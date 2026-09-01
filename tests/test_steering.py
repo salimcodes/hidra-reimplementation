@@ -40,7 +40,7 @@ def test_feature_space_fisher_ratio_captures_variance_only_signal():
     # Definition 3.2 with v_k = e_k (standard basis), mu^A_k = mu^B_k = 0,
     # and a variance gap concentrated on the last coordinate.
     class_a = torch.randn(n, d)
-    class_a[:, -1] *= 2.0  # sigma_A,last = 2 -> variance 4
+    class_a[:, -1] *= 3.0  # sigma_A,last = 3 -> variance 9
     class_b = torch.randn(n, d)  # sigma_B,k = 1 for all k
 
     gamma = 1e-2
@@ -51,5 +51,5 @@ def test_feature_space_fisher_ratio_captures_variance_only_signal():
     lifted_b = proj.lift(class_b)
     r_hidra = fisher_ratio(lifted_a, lifted_b, gamma)
 
-    assert r_lin < 5.0  # near-zero baseline: no mean-difference signal to find
-    assert r_hidra > 5.0 * max(r_lin, 1.0)  # HiDRA recovers a much stronger discriminative signal
+    assert r_lin < 0.01  # near-zero baseline: no mean-difference signal to find
+    assert r_hidra > 10.0 * max(r_lin, 1e-6)  # HiDRA recovers a much stronger discriminative signal

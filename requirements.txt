@@ -1,0 +1,6 @@
+# Core library (hidra/) only needs torch.
+torch>=2.0
+
+# Needed for tests/test_pipeline_synthetic.py and examples/demo_qwen.py.
+transformers>=4.40
+pytest>=7.0
