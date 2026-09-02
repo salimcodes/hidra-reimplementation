@@ -6,6 +6,7 @@ baseline) or in HiDRA's lifted space (Sec. 4.2) -> steered generation via
 Eq. 9, applied through forward hooks on the chosen decoder layer(s).
 """
 
+from contextlib import contextmanager
 from typing import Dict, List, Optional, Sequence
 
 import torch
@@ -72,29 +73,19 @@ class HiDRASteerer:
                 report[l][g] = {"original": r_lin, "hidra": r_phi}
         return report
 
-    def generate(
-        self,
-        prompt: str,
-        alpha: float = 0.0,
-        mode: str = "hidra",
-        scope: str = "all",
-        **gen_kwargs,
-    ) -> str:
-        """Generate text with steering applied at the fitted layer(s).
-
-        mode:  'hidra' (Eq. 9, steer in the lifted space), 'actadd' (plain
-               x + alpha*d in the original space -- the linear baseline), or
-               'none' (unsteered).
-        scope: 'all' steers every forward pass (prefill and each decode
-               step); 'prompt_only' steers only during the initial prefill,
-               matching the paper's two reported settings.
+    @contextmanager
+    def _steering_hooks(self, alpha: float, mode: str, scope: str):
+        """Register the Eq. 9 steering hook on each fitted layer for the
+        duration of the `with` block. Shared by generate() (many forward
+        passes: one prefill + one per decode step) and next_token_logits()
+        (a single forward pass, so `scope` is moot there).
         """
         if mode not in ("hidra", "actadd", "none"):
             raise ValueError(f"unknown mode '{mode}'")
         if scope not in ("all", "prompt_only"):
             raise ValueError(f"unknown scope '{scope}'")
         if mode != "none" and not self.hidra_vectors:
-            raise RuntimeError("call fit() before generate()")
+            raise RuntimeError("call fit() before steering")
 
         state = {"step": -1}
 
@@ -129,14 +120,46 @@ class HiDRASteerer:
 
         handles = [self.model.register_forward_pre_hook(bump_step)]
         handles += [self.extractor.decoder_layers[l].register_forward_hook(make_hook(l)) for l in self.layers]
-
         try:
+            yield
+        finally:
+            for h in handles:
+                h.remove()
+
+    def generate(
+        self,
+        prompt: str,
+        alpha: float = 0.0,
+        mode: str = "hidra",
+        scope: str = "all",
+        **gen_kwargs,
+    ) -> str:
+        """Generate text with steering applied at the fitted layer(s).
+
+        mode:  'hidra' (Eq. 9, steer in the lifted space), 'actadd' (plain
+               x + alpha*d in the original space -- the linear baseline), or
+               'none' (unsteered).
+        scope: 'all' steers every forward pass (prefill and each decode
+               step); 'prompt_only' steers only during the initial prefill,
+               matching the paper's two reported settings.
+        """
+        with self._steering_hooks(alpha, mode, scope):
             device = next(self.model.parameters()).device
             inputs = self.tokenizer(prompt, return_tensors="pt").to(device)
             with torch.no_grad():
                 output_ids = self.model.generate(**inputs, **gen_kwargs)
             generated = output_ids[0, inputs["input_ids"].shape[1]:]
             return self.tokenizer.decode(generated, skip_special_tokens=True)
-        finally:
-            for h in handles:
-                h.remove()
+
+    def next_token_logits(self, prompt: str, alpha: float = 0.0, mode: str = "hidra") -> Tensor:
+        """Single forward pass returning the next-token logits (vocab_size,)
+        at the final prompt position, with steering applied during that one
+        pass. Used for the CAA-style multiple-choice evaluation (Sec. 5.3),
+        which scores next-token probability rather than generating text.
+        """
+        with self._steering_hooks(alpha, mode, scope="all"):
+            device = next(self.model.parameters()).device
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(device)
+            with torch.no_grad():
+                out = self.model(**inputs)
+            return out.logits[0, -1, :].detach().cpu()
