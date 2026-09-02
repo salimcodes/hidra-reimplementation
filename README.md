@@ -1,10 +1,6 @@
 # hidra-reimplementation
 
-A from-scratch reimplementation of the core method from:
-
-> Pham, Do, Abdullaev, Nguyen, Than. **"High-Dimensional Random Projection
-> for Activation Steering in Language Models"** (HiDRA). arXiv:2606.15092v1
-> (`2606.15092v1.pdf` in this repo).
+A from-scratch reimplementation of the core method below:
 
 ## The method
 
